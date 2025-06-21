@@ -1,0 +1,17 @@
+# Dependencies
+/node_modules
+
+# Build output
+/dist
+
+# Logs
+*.log
+*.log.*
+
+# Environment variables
+.env
+.env.*
+
+# Prisma
+/prisma/dev.db
+/prisma/dev.db-journal
