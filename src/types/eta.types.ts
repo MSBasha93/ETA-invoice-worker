@@ -44,14 +44,27 @@ export interface IInvoiceLine {
   internalCode: string;
 }
 
-// This models the response from GET .../details, where 'document' is OPTIONAL.
-export interface IInvoiceDetails {
+// This represents the nested "document" object, which is the actual Invoice v1.0
+export interface IInvoiceV1 {
+  issuer: { id: string; name: string; type: string; address?: any };
+  receiver: { id: string; name: string; type: string; address?: any };
+  documentType: string;
+  documentTypeVersion: string;
+  dateTimeIssued: string;
+  internalId: string;
+  totalSalesAmount: number;
+  totalDiscountAmount: number;
+  netAmount: number;
+  totalAmount: number;
+  invoiceLines: IInvoiceLine[];
+}
+
+// This represents the full response from the GET /.../raw or /.../details endpoint
+export interface IAPIDocumentResponse {
   uuid: string;
+  submissionUUID: string;
   status: string;
-  document?: {
-    totalSalesAmount: number;
-    totalDiscountAmount: number;
-    netAmount: number;
-    invoiceLines?: IInvoiceLine[];
-  };
+  dateTimeReceived: string;
+  // The crucial part: the document object is nested and optional
+  document?: IInvoiceV1;
 }

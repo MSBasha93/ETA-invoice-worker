@@ -3,7 +3,6 @@ import { logger } from '../utils/logger';
 import * as db from './databaseService';
 import * as eta from './etaApiService';
 import { config } from '../config';
-import { IInvoiceDetails } from '../types/eta.types';
 
 export async function runFullSync() {
   logger.info('Starting sync cycle...');
@@ -27,7 +26,6 @@ export async function runFullSync() {
     logger.info(`--- Processing Page ${page} ---`);
 
     try {
-      // PHASE 1: Get reliable summaries
       const searchResult = await eta.searchInvoices({
         ...searchParams,
         continuationToken,
@@ -38,17 +36,14 @@ export async function runFullSync() {
         break;
       }
 
-      // PHASE 2 & 3: For each summary, get details and save immediately.
       for (const summary of searchResult.result) {
-        let details: IInvoiceDetails | null = null;
+        let details = null;
         try {
           details = await eta.getInvoiceDetails(summary.uuid);
         } catch (error) {
-          logger.error({ uuid: summary.uuid, error }, "Failed to fetch details for document. Saving header info only.");
-          // If the details call fails, `details` remains null, which is handled by upsertInvoice.
+          logger.error({ uuid: summary.uuid, error }, "Failed to fetch details. Saving header info only.");
         }
         
-        // Save the merged data.
         await db.upsertInvoice(summary, details);
         totalSaved++;
       }
@@ -59,7 +54,7 @@ export async function runFullSync() {
       page++;
 
     } catch(error) {
-        logger.error({ error }, "A fatal error occurred during the search phase. Halting sync cycle.");
+        logger.error({ error }, "A fatal error occurred while searching for documents. Halting sync cycle.");
         break;
     }
 

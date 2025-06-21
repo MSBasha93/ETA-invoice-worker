@@ -1,19 +1,21 @@
 // src/services/databaseService.ts
 import { Prisma, PrismaClient } from '@prisma/client';
-import { IInvoiceSummary, IInvoiceDetails } from '../types/eta.types';
+import { IInvoiceSummary, IAPIDocumentResponse } from '../types/eta.types';
 import { logger } from '../utils/logger';
 
 export const prisma = new PrismaClient();
 
-// This function now takes the summary and the full (but potentially partial) details object.
 export async function upsertInvoice(
   summary: IInvoiceSummary,
-  details: IInvoiceDetails | null // Details can be null if the fetch fails
+  details: IAPIDocumentResponse | null
 ) {
   logger.debug(`Upserting invoice with UUID: ${summary.uuid}`);
 
+  // The nested invoice object, or null if it doesn't exist
+  const nestedDoc = details?.document;
+
   const invoicePayload: Prisma.InvoiceCreateInput = {
-    // These fields come from the reliable summary
+    // Start with the reliable data from the summary
     uuid: summary.uuid,
     submissionUuid: summary.submissionUUID,
     internalId: summary.internalId,
@@ -28,16 +30,16 @@ export async function upsertInvoice(
     receiverType: summary.receiverType || 'N/A',
     dateTimeIssued: new Date(summary.dateTimeIssued),
     dateTimeReceived: new Date(summary.dateTimeReceived),
-    totalAmount: summary.total,
-
-    // These fields are ENHANCED from the details object, with fallbacks.
-    totalSales: details?.document?.totalSalesAmount || 0,
-    totalDiscount: details?.document?.totalDiscountAmount || 0,
-    netAmount: details?.document?.netAmount || 0,
+    
+    // Enhance with details from the nested object if it exists, otherwise use summary total.
+    totalAmount: nestedDoc?.totalAmount ?? summary.total,
+    totalSales: nestedDoc?.totalSalesAmount ?? 0,
+    totalDiscount: nestedDoc?.totalDiscountAmount ?? 0,
+    netAmount: nestedDoc?.netAmount ?? 0,
   };
 
-  // Only get lines if the details and the nested objects exist.
-  const lines = details?.document?.invoiceLines || [];
+  // Get lines ONLY from the nested document object.
+  const lines = nestedDoc?.invoiceLines || [];
   const lineItemsPayload: Prisma.InvoiceLineCreateManyInput[] = lines.map(line => ({
     invoiceUuid: summary.uuid,
     description: line.description,
@@ -75,7 +77,7 @@ export async function upsertInvoice(
   }
 }
 
-// ... the rest of the file is correct and unchanged ...
+// ... getLastSyncTimestamp and updateLastSyncTimestamp are correct and unchanged ...
 export async function getLastSyncTimestamp(): Promise<Date> {
   const status = await prisma.syncStatus.findUnique({ where: { id: 1 } });
   if (status) { return status.lastSyncTimestamp; }

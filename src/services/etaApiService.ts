@@ -1,7 +1,7 @@
 // src/services/etaApiService.ts
 import PQueue from 'p-queue';
 import etaApiClient from '../utils/httpClient';
-import { IInvoiceDetails, IInvoiceSearchResult } from '../types/eta.types';
+import { IAPIDocumentResponse, IInvoiceSearchResult } from '../types/eta.types';
 import { logger } from '../utils/logger';
 
 // 2 requests per second queue
@@ -21,8 +21,8 @@ export async function searchInvoices(
   ).then(response => response.data);
 }
 
-// Switch back to the /details endpoint.
-export async function getInvoiceDetails(uuid: string): Promise<IInvoiceDetails> {
+// Using the /details endpoint is fine now that we understand its structure.
+export async function getInvoiceDetails(uuid: string): Promise<IAPIDocumentResponse> {
   logger.debug(`Fetching details for invoice UUID: ${uuid}`);
   return twoRequestsPerSecondQueue.add(() => 
     etaApiClient.get(`/api/v1.0/documents/${uuid}/details`)
