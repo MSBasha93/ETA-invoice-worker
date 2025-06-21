@@ -14,7 +14,17 @@ export async function runFullSync() {
   logger.info('Starting sync cycle...');
 
   const lastSyncTime = await db.getLastSyncTimestamp();
-  logger.info(`Fetching invoices since ${lastSyncTime.toISOString()}`);
+  
+  // --- CORRECTED LOGIC: Add an end date for the query ---
+  const now = new Date();
+  const searchParams = {
+    submissionDateFrom: lastSyncTime.toISOString(),
+    submissionDateTo: now.toISOString(), // Always provide an end date
+    pageSize: config.worker.pageSize,
+  };
+  // --- END OF CORRECTION ---
+
+  logger.info(`Fetching invoices from ${searchParams.submissionDateFrom} to ${searchParams.submissionDateTo}`);
 
   let continuationToken: string | undefined;
   let page = 1;
@@ -22,31 +32,35 @@ export async function runFullSync() {
 
   do {
     logger.info(`Processing page ${page}...`);
-    const searchResult = await eta.searchInvoices({
-      submissionDateFrom: lastSyncTime.toISOString(),
-      continuationToken,
+
+    // The API requires that the date filters are NOT sent on subsequent paginated requests.
+    // So we'll build the parameters for each loop iteration.
+    const currentPageParams: any = {
       pageSize: config.worker.pageSize,
-    });
+      continuationToken,
+    };
+
+    if (page === 1) {
+      currentPageParams.submissionDateFrom = searchParams.submissionDateFrom;
+      currentPageParams.submissionDateTo = searchParams.submissionDateTo;
+    }
+
+    const searchResult = await eta.searchInvoices(currentPageParams);
     
     if (searchResult.result.length === 0) {
       logger.info('No new documents found on this page.');
       break;
     }
 
-    // --- CORRECTED LOGIC ---
     const allDetails: IInvoiceDetails[] = [];
     
-    // Create an array of tasks to be executed by the queue.
-    // As each task finishes, it will push its result into the 'allDetails' array.
     const tasks = searchResult.result.map((summary: IInvoiceSummary) => 
       detailFetchQueue.add(async () => {
         const details = await eta.getInvoiceDetails(summary.uuid);
         
-        // Sometimes the details object is missing issuer/receiver if you are not the issuer.
-        // We merge the data from the summary list to ensure it's complete.
         if (summary && !details.document?.issuer?.id) {
           if (!details.document) {
-            // @ts-ignore - Create the document object if it's completely missing
+            // @ts-ignore
             details.document = {}; 
           }
           details.document.issuer = { id: summary.issuerId, name: summary.issuerName, type: '', address: {} };
@@ -57,11 +71,8 @@ export async function runFullSync() {
       })
     );
     
-    // Wait for all the detail-fetching tasks on this page to complete.
     await Promise.all(tasks);
-    // --- END OF CORRECTION ---
 
-    // Now, save all the fully fetched details to the database.
     for (const invoiceDetail of allDetails) {
         await db.upsertInvoice(invoiceDetail);
     }
