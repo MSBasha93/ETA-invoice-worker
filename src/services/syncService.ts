@@ -10,13 +10,14 @@ export async function runFullSync() {
   const lastSyncTime = await db.getLastSyncTimestamp();
   
   const now = new Date();
+  // Using issueDate as requested
   const searchParams = {
-    submissionDateFrom: lastSyncTime.toISOString(),
-    submissionDateTo: now.toISOString(),
+    issueDateFrom: lastSyncTime.toISOString(),
+    issueDateTo: now.toISOString(),
     pageSize: config.worker.pageSize,
   };
   
-  logger.info(`Fetching invoices from ${searchParams.submissionDateFrom} to ${searchParams.submissionDateTo}`);
+  logger.info(`Fetching invoices issued from ${searchParams.issueDateFrom} to ${searchParams.issueDateTo}`);
 
   let continuationToken: string | undefined;
   let page = 1;
@@ -37,14 +38,14 @@ export async function runFullSync() {
       }
 
       for (const summary of searchResult.result) {
-        let details = null;
+        let rawData = null;
         try {
-          details = await eta.getInvoiceDetails(summary.uuid);
+          rawData = await eta.getInvoiceRawData(summary.uuid);
         } catch (error) {
-          logger.error({ uuid: summary.uuid, error }, "Failed to fetch details. Saving header info only.");
+          logger.error({ uuid: summary.uuid, error }, "Failed to fetch raw data for document. Saving header info only.");
         }
         
-        await db.upsertInvoice(summary, details);
+        await db.upsertInvoice(summary, rawData);
         totalSaved++;
       }
 
@@ -63,5 +64,6 @@ export async function runFullSync() {
   logger.info(`--- Sync Cycle Finished ---`);
   logger.info(`Successfully processed and saved ${totalSaved} documents.`);
   
-  await db.updateLastSyncTimestamp();
+  // We update the timestamp based on the end of our search window.
+  await db.updateLastSyncTimestamp(now);
 }
