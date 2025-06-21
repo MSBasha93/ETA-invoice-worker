@@ -1,3 +1,4 @@
+// src/config/index.ts
 import 'dotenv/config';
 
 function getEnv(key: string): string {
@@ -20,8 +21,6 @@ export const config = {
   worker: {
     cronSchedule: getEnv('WORKER_CRON_SCHEDULE'),
     pageSize: 100,
-    rateLimitRequests: 2,
-    rateLimitInterval: 1000,
-    maxRetries: 3,
+    // The specific rate limits are now handled inside the etaApiService
   },
 };

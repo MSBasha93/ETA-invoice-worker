@@ -1,3 +1,4 @@
+// src/utils/httpClient.ts
 import axios from 'axios';
 import { getValidToken } from '../services/authService';
 import { config } from '../config';
@@ -11,24 +12,32 @@ const etaApiClient = axios.create({
   },
 });
 
+// This interceptor automatically adds the valid auth token to every request.
 etaApiClient.interceptors.request.use(async (axiosConfig) => {
   const token = await getValidToken();
   axiosConfig.headers.Authorization = `Bearer ${token}`;
   return axiosConfig;
 });
 
+// The old reactive rate-limit retry interceptor has been removed,
+// as this is now handled proactively by dedicated queues in etaApiService.
+// This simplifies our error handling.
 etaApiClient.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const { status } = error.response || {};
-    if (status === 429 || status === 503) {
-      const retryAfter = error.response.headers['retry-after'] || 5;
-      logger.warn(`Rate limited. Retrying after ${retryAfter} seconds...`);
-      await new Promise(res => setTimeout(res, retryAfter * 1000));
-      return etaApiClient.request(error.config);
-    }
+  (error) => {
+    // We still want to log errors that occur.
+    logger.error({
+        err: {
+            message: error.message,
+            status: error.response?.status,
+            data: error.response?.data,
+            url: error.config?.url,
+        }
+    }, 'An API request failed');
+
     return Promise.reject(error);
   }
 );
+
 
 export default etaApiClient;
