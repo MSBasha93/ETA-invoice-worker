@@ -1,5 +1,5 @@
-// src/utils/httpClient.ts
 import axios from 'axios';
+import axiosRetry from 'axios-retry';
 import { getValidToken } from '../services/authService';
 import { config } from '../config';
 import { logger } from './logger';
@@ -19,25 +19,30 @@ etaApiClient.interceptors.request.use(async (axiosConfig) => {
   return axiosConfig;
 });
 
-// The old reactive rate-limit retry interceptor has been removed,
-// as this is now handled proactively by dedicated queues in etaApiService.
-// This simplifies our error handling.
-etaApiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    // We still want to log errors that occur.
-    logger.error({
-        err: {
-            message: error.message,
-            status: error.response?.status,
-            data: error.response?.data,
-            url: error.config?.url,
-        }
-    }, 'An API request failed');
-
-    return Promise.reject(error);
-  }
-);
-
+// Use axios-retry to automatically handle transient errors, especially rate limiting.
+axiosRetry(etaApiClient, {
+  retries: 3, // Number of retries
+  retryDelay: (retryCount, error) => {
+    // For 429 errors, respect the 'Retry-After' header if available.
+    if (error.response?.status === 429) {
+      const retryAfter = error.response.headers['retry-after'];
+      if (retryAfter) {
+        const delay = parseInt(retryAfter, 10) * 1000;
+        logger.warn(`Rate limited. Retrying after ${delay}ms...`);
+        return delay;
+      }
+    }
+    // For other errors, use exponential backoff.
+    logger.warn(`Request failed. Retrying in ${retryCount * 1000}ms...`);
+    return axiosRetry.exponentialDelay(retryCount);
+  },
+  retryCondition: (error) => {
+    // Only retry on network errors or 5xx server errors and 429 rate limit errors.
+    return (
+      axiosRetry.isNetworkOrIdempotentRequestError(error) ||
+      error.response?.status === 429
+    );
+  },
+});
 
 export default etaApiClient;

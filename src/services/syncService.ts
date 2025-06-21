@@ -1,8 +1,8 @@
-// src/services/syncService.ts
 import { logger } from '../utils/logger';
 import * as db from './databaseService';
 import * as eta from './etaApiService';
 import { config } from '../config';
+import { IInvoiceRawData } from '../types/eta.types';
 
 export async function runFullSync() {
   logger.info('Starting sync cycle...');
@@ -23,9 +23,11 @@ export async function runFullSync() {
   let totalSaved = 0;
 
   do {
-    logger.info(`Processing page ${page}...`);
+    logger.info(`--- Processing Page ${page} ---`);
 
     try {
+      // PHASE 1: EXTRACT SUMMARIES
+      logger.info(`Phase 1: Fetching document summaries for page ${page}...`);
       const searchResult = await eta.searchInvoices({
         ...searchParams,
         continuationToken,
@@ -36,16 +38,34 @@ export async function runFullSync() {
         break;
       }
 
-      for (const summary of searchResult.result) {
-        try {
-          const rawData = await eta.getInvoiceRawData(summary.uuid);
-          
-          // --- FIX: Pass the 'summary' along with the 'rawData' ---
+      // PHASE 2: EXTRACT DETAILS
+      logger.info(`Phase 2: Fetching raw data for ${searchResult.result.length} documents...`);
+      const detailPromises = searchResult.result.map(summary => 
+        eta.getInvoiceRawData(summary.uuid)
+          .catch(err => {
+            logger.error({ uuid: summary.uuid, err }, "Giving up on fetching details for document after retries.");
+            return null; // Return null if fetching fails after all retries
+          })
+      );
+      const allRawData = await Promise.all(detailPromises);
+
+
+      // PHASE 3: LOAD TO DATABASE
+      logger.info(`Phase 3: Saving ${allRawData.filter(d => d).length} documents to the database...`);
+      const allSummaries = searchResult.result;
+      
+      for (let i = 0; i < allSummaries.length; i++) {
+        const summary = allSummaries[i];
+        const rawData = allRawData[i];
+
+        if (rawData) {
+          // If we got the details, save them.
           await db.upsertInvoice(summary, rawData);
           totalSaved++;
-
-        } catch (error) {
-          logger.error({ uuid: summary.uuid, error }, "Failed to process a single document. Skipping to the next.");
+        } else {
+          // If fetching details failed permanently, we could choose to save header-only info here if needed.
+          // For now, we log that it was skipped.
+          logger.warn(`Skipping database save for ${summary.uuid} due to earlier fetch failure.`);
         }
       }
 
@@ -55,13 +75,14 @@ export async function runFullSync() {
       page++;
 
     } catch(error) {
-        logger.error({ error }, "A fatal error occurred while searching for documents. Halting sync cycle.");
+        logger.error({ error }, "A fatal error occurred during the search phase. Halting sync cycle.");
         break;
     }
 
   } while (continuationToken);
 
-  logger.info(`Sync cycle finished. Successfully processed and saved ${totalSaved} documents.`);
+  logger.info(`--- Sync Cycle Finished ---`);
+  logger.info(`Successfully saved ${totalSaved} documents in total.`);
   
   await db.updateLastSyncTimestamp();
 }
