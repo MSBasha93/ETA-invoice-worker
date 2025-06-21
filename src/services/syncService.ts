@@ -1,67 +1,60 @@
-// src/services/syncService.ts
+// src/services/syncService.ts - DIAGNOSTIC SUPER-LOGGER VERSION
+
 import { logger } from '../utils/logger';
-import * as db from './databaseService';
 import * as eta from './etaApiService';
-import { config } from '../config';
 
 export async function runFullSync() {
-  logger.info('Starting sync cycle...');
+  logger.info('--- RUNNING IN DIAGNOSTIC MODE ---');
 
-  const lastSyncTime = await db.getLastSyncTimestamp();
-  
-  const now = new Date();
-  const searchParams = {
-    submissionDateFrom: lastSyncTime.toISOString(),
-    submissionDateTo: now.toISOString(),
-    pageSize: config.worker.pageSize,
-  };
-  
-  logger.info(`Fetching invoices from ${searchParams.submissionDateFrom} to ${searchParams.submissionDateTo}`);
+  try {
+    // --- Step 1: Search for one single document using issueDate ---
+    // We will search for documents issued in a known recent period.
+    const searchEndDate = new Date();
+    const searchStartDate = new Date();
+    searchStartDate.setDate(searchEndDate.getDate() - 5); // Search the last 5 days
 
-  let continuationToken: string | undefined;
-  let page = 1;
-  let totalSaved = 0;
+    logger.info(`Searching for one document issued between ${searchStartDate.toISOString()} and ${searchEndDate.toISOString()}`);
 
-  do {
-    logger.info(`--- Processing Page ${page} ---`);
+    const searchResult = await eta.searchInvoices({
+      issueDateFrom: searchStartDate.toISOString(),
+      issueDateTo: searchEndDate.toISOString(),
+      pageSize: 1, // We only want one document to test with
+    });
 
-    try {
-      const searchResult = await eta.searchInvoices({
-        ...searchParams,
-        continuationToken,
-      });
-      
-      if (!searchResult.result || searchResult.result.length === 0) {
-        logger.info('No new documents found on this page. Ending sync.');
-        break;
-      }
-
-      for (const summary of searchResult.result) {
-        let details = null;
-        try {
-          details = await eta.getInvoiceDetails(summary.uuid);
-        } catch (error) {
-          logger.error({ uuid: summary.uuid, error }, "Failed to fetch details. Saving header info only.");
-        }
-        
-        await db.upsertInvoice(summary, details);
-        totalSaved++;
-      }
-
-      continuationToken = searchResult.metadata.continuationToken === 'EndofResultSet' 
-        ? undefined 
-        : searchResult.metadata.continuationToken;
-      page++;
-
-    } catch(error) {
-        logger.error({ error }, "A fatal error occurred while searching for documents. Halting sync cycle.");
-        break;
+    if (!searchResult.result || searchResult.result.length === 0) {
+      logger.error('DIAGNOSTIC FAILED: Could not find a single document in the date range to test with.');
+      process.exit(1);
     }
 
-  } while (continuationToken);
+    const testSummary = searchResult.result[0];
+    const testUuid = testSummary.uuid;
+    logger.info(`Found test document with UUID: ${testUuid}`);
+    console.log('\n\n--- DOCUMENT SUMMARY OBJECT ---');
+    console.log(JSON.stringify(testSummary, null, 2));
 
-  logger.info(`--- Sync Cycle Finished ---`);
-  logger.info(`Successfully processed and saved ${totalSaved} documents.`);
-  
-  await db.updateLastSyncTimestamp();
+
+    // --- Step 2: Get the response from the /details endpoint ---
+    logger.info(`Fetching from /details endpoint for UUID: ${testUuid}`);
+    const detailsResponse = await eta.getInvoiceDetails(testUuid);
+    
+    console.log('\n\n--- FULL /details RESPONSE ---');
+    console.log(JSON.stringify(detailsResponse, null, 2));
+    
+
+    // --- Step 3: Get the response from the /raw endpoint ---
+    logger.info(`Fetching from /raw endpoint for UUID: ${testUuid}`);
+    const rawResponse = await eta.getInvoiceRawData(testUuid);
+
+    console.log('\n\n--- FULL /raw RESPONSE ---');
+    console.log(JSON.stringify(rawResponse, null, 2));
+
+
+    // --- Step 4: Exit successfully ---
+    logger.info('--- DIAGNOSTIC COMPLETE ---');
+    process.exit(0);
+
+  } catch (error) {
+    logger.error({ error }, "A fatal error occurred during the diagnostic run.");
+    process.exit(1);
+  }
 }
