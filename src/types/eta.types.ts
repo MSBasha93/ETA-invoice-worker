@@ -1,4 +1,5 @@
-// Based on the 'Search Documents' API response
+// src/types/eta.types.ts
+
 export interface IInvoiceSummary {
   uuid: string;
   submissionUUID: string;
@@ -22,7 +23,7 @@ export interface IInvoiceSearchResult {
   };
 }
 
-// Based on the 'Get Document Details' API response you provided
+// A single line item, matching the structure inside the API response
 export interface IInvoiceLine {
   description: string;
   itemType: string;
@@ -40,48 +41,29 @@ export interface IInvoiceLine {
     amount: number;
   };
   internalCode: string;
-  lineTaxableItems?: Array<{
-    taxType: string;
-    amount: number;
-    subType: string;
-    rate: number;
-  }>;
 }
 
-export interface IInvoiceDetails {
-  submissionUUID: string;
-  dateTimeRecevied: string; // The typo is in the API
-  status: string;
+// This now models the response from the GET .../documents/{uuid}/raw endpoint
+export interface IInvoiceRawData {
   uuid: string;
-  // The 'document' object contains the core invoice data. We model this based on the docs and your old SQL schema.
-  document: {
-    issuer: {
-      name: string;
-      type: string;
-      id: string;
-      address: any; // Storing as JSON
-    };
-    receiver: {
-      name: string;
-      type: string;
-      id: string;
-      address: any; // Storing as JSON
-    };
-    documentType: string;
-    documentTypeVersion: string;
-    dateTimeIssued: string;
-    internalId: string;
-    totalSalesAmount: number;
-    totalDiscountAmount: number;
-    netAmount: number;
-    totalAmount: number;
-    taxTotals: Array<{
-      taxType: string;
-      amount: number;
-    }>;
-    invoiceLines: IInvoiceLine[];
-  };
-  validationResults?: {
-    status: string;
+  submissionUUID: string;
+  internalId: string;
+  typeName: string;
+  typeVersionName: string;
+  issuerId: string;
+  issuerName: string;
+  // Use optional chaining for receiver as it might not always exist
+  receiverId?: string;
+  receiverName?: string;
+  dateTimeIssued: string;
+  dateTimeReceived: string;
+  totalSales: number;
+  totalDiscount: number;
+  netAmount: number;
+  total: number;
+  status: string;
+  // The 'document' object is optional and may only contain invoiceLines
+  document?: {
+    invoiceLines?: IInvoiceLine[];
   };
 }

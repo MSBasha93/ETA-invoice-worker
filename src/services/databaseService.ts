@@ -1,54 +1,37 @@
 // src/services/databaseService.ts
 import { Prisma, PrismaClient } from '@prisma/client';
-import { IInvoiceDetails } from '../types/eta.types';
+import { IInvoiceRawData } from '../types/eta.types';
 import { logger } from '../utils/logger';
 
 export const prisma = new PrismaClient();
 
-export async function upsertInvoice(invoiceData: IInvoiceDetails) {
-  // --- SAFETY CHECK 1: The 'document' object ---
-  // The API can sometimes return a details object without the nested 'document' object.
-  // We must check for its existence before proceeding.
-  if (!invoiceData.document) {
-    logger.warn({
-      uuid: invoiceData.uuid,
-      status: invoiceData.status
-    }, "Skipping invoice due to missing 'document' object in API response.");
-    return; // Exit the function for this invoice and move to the next one.
-  }
-  
-  const doc = invoiceData.document;
+export async function upsertInvoice(rawData: IInvoiceRawData) {
+  logger.debug(`Upserting invoice with UUID: ${rawData.uuid}`);
 
   const invoicePayload: Prisma.InvoiceCreateInput = {
-    uuid: invoiceData.uuid,
-    submissionUuid: invoiceData.submissionUUID,
-    internalId: doc.internalId,
-    status: invoiceData.status,
-    typeName: doc.documentType,
-    typeVersion: doc.documentTypeVersion,
-    issuerId: doc.issuer.id,
-    issuerName: doc.issuer.name,
-    issuerType: doc.issuer.type,
-    issuerAddress: doc.issuer.address,
-    receiverId: doc.receiver.id,
-    receiverName: doc.receiver.name,
-    receiverType: doc.receiver.type,
-    receiverAddress: doc.receiver.address,
-    dateTimeIssued: new Date(doc.dateTimeIssued),
-    dateTimeReceived: new Date(invoiceData.dateTimeRecevied), // Correcting API typo
-    totalSales: doc.totalSalesAmount,
-    totalDiscount: doc.totalDiscountAmount,
-    netAmount: doc.netAmount,
-    totalAmount: doc.totalAmount,
-    taxTotals: doc.taxTotals,
-    validationResults: invoiceData.validationResults,
+    uuid: rawData.uuid,
+    submissionUuid: rawData.submissionUUID,
+    internalId: rawData.internalId,
+    status: rawData.status,
+    typeName: rawData.typeName,
+    typeVersion: rawData.typeVersionName,
+    issuerId: rawData.issuerId,
+    issuerName: rawData.issuerName,
+    // Safely handle potentially missing receiver info
+    receiverId: rawData.receiverId || 'N/A',
+    receiverName: rawData.receiverName || 'N/A',
+    dateTimeIssued: new Date(rawData.dateTimeIssued),
+    dateTimeReceived: new Date(rawData.dateTimeReceived),
+    totalAmount: rawData.total,
+    totalSales: rawData.totalSales,
+    totalDiscount: rawData.totalDiscount,
+    netAmount: rawData.netAmount,
   };
 
-  // --- SAFETY CHECK 2: The 'invoiceLines' array ---
-  // The document object might exist, but be missing the lines array.
-  // The `(doc.invoiceLines || [])` ensures we map over an empty array instead of `undefined`, preventing a crash.
-  const lineItemsPayload: Prisma.InvoiceLineCreateManyInput[] = (doc.invoiceLines || []).map(line => ({
-    invoiceUuid: invoiceData.uuid,
+  // Safely get lines from the optional nested object
+  const lines = rawData.document?.invoiceLines || [];
+  const lineItemsPayload: Prisma.InvoiceLineCreateManyInput[] = lines.map(line => ({
+    invoiceUuid: rawData.uuid,
     description: line.description,
     itemCode: line.itemCode,
     itemType: line.itemType,
@@ -61,36 +44,32 @@ export async function upsertInvoice(invoiceData: IInvoiceDetails) {
     discountRate: line.discount.rate,
     netTotal: line.netTotal,
     totalAmount: line.total,
-    taxableItems: line.lineTaxableItems || [],
   }));
-
 
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.invoice.upsert({
-        where: { uuid: invoiceData.uuid },
+        where: { uuid: rawData.uuid },
         update: invoicePayload,
         create: invoicePayload,
       });
 
-      await tx.invoiceLine.deleteMany({ where: { invoiceUuid: invoiceData.uuid } });
+      await tx.invoiceLine.deleteMany({ where: { invoiceUuid: rawData.uuid } });
       
       if (lineItemsPayload.length > 0) {
         await tx.invoiceLine.createMany({ data: lineItemsPayload });
       }
     });
-    logger.debug(`Successfully saved invoice ${invoiceData.uuid}`);
+    logger.info(`Successfully saved invoice ${rawData.uuid} with ${lineItemsPayload.length} lines.`);
   } catch (error) {
-    logger.error(`Failed to save invoice ${invoiceData.uuid}`, { error });
+    logger.error(`Failed to save invoice ${rawData.uuid}`, { error });
     throw error;
   }
 }
 
 export async function getLastSyncTimestamp(): Promise<Date> {
   const status = await prisma.syncStatus.findUnique({ where: { id: 1 } });
-  if (status) {
-    return status.lastSyncTimestamp;
-  }
+  if (status) { return status.lastSyncTimestamp; }
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   return thirtyDaysAgo;

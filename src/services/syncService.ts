@@ -26,7 +26,6 @@ export async function runFullSync() {
     logger.info(`Processing page ${page}...`);
 
     try {
-      // THE PAGINATION FIX: We MUST keep sending the date filters on every request.
       const searchResult = await eta.searchInvoices({
         ...searchParams,
         continuationToken,
@@ -37,26 +36,19 @@ export async function runFullSync() {
         break;
       }
 
-      // THE GRAND FIX: A simple `for...of` loop is more robust than Promise.all for this task.
-      // It processes one document at a time, allowing the rate-limiting queue in `etaApiService`
-      // to work perfectly without bursting.
+      // Use a simple, sequential loop for maximum robustness against rate-limiting bursts.
       for (const summary of searchResult.result) {
         try {
-          const details = await eta.getInvoiceDetails(summary.uuid);
+          // Fetch the full, reliable data from the /raw endpoint
+          const rawData = await eta.getInvoiceRawData(summary.uuid);
           
-          // Defensive data merge
-          if (details.document && !details.document.issuer?.id) {
-            details.document.issuer = { id: summary.issuerId, name: summary.issuerName, type: '', address: {} };
-            details.document.receiver = { id: summary.receiverId, name: summary.receiverName, type: '', address: {} };
-          }
-          
-          // The upsert function already contains safety checks for missing `document` objects.
-          await db.upsertInvoice(details);
+          // Save the data. The upsert function handles the logic of checking for lines.
+          await db.upsertInvoice(rawData);
           totalSaved++;
 
         } catch (error) {
           logger.error({ uuid: summary.uuid, error }, "Failed to process a single document. Skipping to the next.");
-          // This catch block ensures that if one document fails, the whole loop doesn't crash.
+          // This ensures that if one document fails, the entire sync doesn't crash.
         }
       }
 
@@ -67,15 +59,14 @@ export async function runFullSync() {
 
     } catch(error) {
         logger.error({ error }, "A fatal error occurred while searching for documents. Halting sync cycle.");
-        // If the search itself fails (like the 400 error), we break the main loop.
+        // If the main search itself fails, break the loop.
         break;
     }
 
   } while (continuationToken);
 
-  logger.info(`Sync cycle finished. Successfully saved ${totalSaved} documents.`);
-  // Only update the timestamp if the process didn't end in a fatal search error.
-  if (totalSaved > 0 || !continuationToken) {
-    await db.updateLastSyncTimestamp();
-  }
+  logger.info(`Sync cycle finished. Successfully processed and saved ${totalSaved} documents.`);
+  
+  // Update the timestamp to avoid re-processing records, even if some failed individually.
+  await db.updateLastSyncTimestamp();
 }

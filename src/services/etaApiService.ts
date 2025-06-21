@@ -1,16 +1,11 @@
 // src/services/etaApiService.ts
 import PQueue from 'p-queue';
 import etaApiClient from '../utils/httpClient';
-import { IInvoiceDetails, IInvoiceSearchResult } from '../types/eta.types';
+import { IInvoiceRawData, IInvoiceSearchResult } from '../types/eta.types';
 import { logger } from '../utils/logger';
 
-// --- Create dedicated queues for each API rate limit ---
-
-// Limit: 2 requests per second (1000ms / 2 = 500ms interval)
+// 2 requests per second queue
 const twoRequestsPerSecondQueue = new PQueue({ interval: 1000, intervalCap: 2 });
-
-// --- End of queue definitions ---
-
 
 export async function searchInvoices(
   params: {
@@ -21,18 +16,15 @@ export async function searchInvoices(
   }
 ): Promise<IInvoiceSearchResult> {
   logger.debug(`Searching for invoices with params:`, params);
-
-  // Wrap the API call in the appropriate queue
   return twoRequestsPerSecondQueue.add(() => 
     etaApiClient.get('/api/v1.0/documents/search', { params })
   ).then(response => response.data);
 }
 
-export async function getInvoiceDetails(uuid: string): Promise<IInvoiceDetails> {
-  logger.debug(`Fetching details for invoice UUID: ${uuid}`);
-
-  // Wrap the API call in the appropriate queue
+// Switched from getInvoiceDetails to getInvoiceRawData
+export async function getInvoiceRawData(uuid: string): Promise<IInvoiceRawData> {
+  logger.debug(`Fetching raw data for invoice UUID: ${uuid}`);
   return twoRequestsPerSecondQueue.add(() => 
-    etaApiClient.get(`/api/v1.0/documents/${uuid}/details`)
+    etaApiClient.get(`/api/v1.0/documents/${uuid}/raw`)
   ).then(response => response.data);
 }
