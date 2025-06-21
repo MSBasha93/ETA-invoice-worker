@@ -1,7 +1,7 @@
 // src/services/etaApiService.ts
 import PQueue from 'p-queue';
 import etaApiClient from '../utils/httpClient';
-import { IInvoiceRawData, IInvoiceSearchResult } from '../types/eta.types';
+import { IInvoiceDetails, IInvoiceSearchResult } from '../types/eta.types';
 import { logger } from '../utils/logger';
 
 // 2 requests per second queue
@@ -21,10 +21,10 @@ export async function searchInvoices(
   ).then(response => response.data);
 }
 
-// Switched from getInvoiceDetails to getInvoiceRawData
-export async function getInvoiceRawData(uuid: string): Promise<IInvoiceRawData> {
-  logger.debug(`Fetching raw data for invoice UUID: ${uuid}`);
+// Switch back to the /details endpoint.
+export async function getInvoiceDetails(uuid: string): Promise<IInvoiceDetails> {
+  logger.debug(`Fetching details for invoice UUID: ${uuid}`);
   return twoRequestsPerSecondQueue.add(() => 
-    etaApiClient.get(`/api/v1.0/documents/${uuid}/raw`)
+    etaApiClient.get(`/api/v1.0/documents/${uuid}/details`)
   ).then(response => response.data);
 }

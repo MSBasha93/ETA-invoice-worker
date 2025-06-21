@@ -8,17 +8,15 @@ export interface IInvoiceSummary {
   typeVersionName: string;
   issuerId: string;
   issuerName: string;
-  issuerType: string; // <-- Must be here
+  issuerType: string;
   receiverId: string;
   receiverName: string;
-  receiverType: string; // <-- Must be here
+  receiverType: string;
   dateTimeIssued: string;
   dateTimeReceived: string;
   total: number;
   status: string;
 }
-
-// ... rest of the file is unchanged, but included for completeness ...
 
 export interface IInvoiceSearchResult {
   result: IInvoiceSummary[];
@@ -46,24 +44,14 @@ export interface IInvoiceLine {
   internalCode: string;
 }
 
-export interface IInvoiceRawData {
+// This models the response from GET .../details, where 'document' is OPTIONAL.
+export interface IInvoiceDetails {
   uuid: string;
-  submissionUUID: string;
-  internalId: string;
-  typeName: string;
-  typeVersionName: string;
-  issuerId: string;
-  issuerName: string;
-  receiverId?: string;
-  receiverName?: string;
-  dateTimeIssued: string;
-  dateTimeReceived: string;
-  totalSales: number;
-  totalDiscount: number;
-  netAmount: number;
-  total: number;
   status: string;
   document?: {
+    totalSalesAmount: number;
+    totalDiscountAmount: number;
+    netAmount: number;
     invoiceLines?: IInvoiceLine[];
   };
 }

@@ -1,44 +1,45 @@
 // src/services/databaseService.ts
 import { Prisma, PrismaClient } from '@prisma/client';
-import { IInvoiceRawData, IInvoiceSummary } from '../types/eta.types';
+import { IInvoiceSummary, IInvoiceDetails } from '../types/eta.types';
 import { logger } from '../utils/logger';
 
 export const prisma = new PrismaClient();
 
-// The function now accepts the summary object alongside the raw data
+// This function now takes the summary and the full (but potentially partial) details object.
 export async function upsertInvoice(
   summary: IInvoiceSummary,
-  rawData: IInvoiceRawData
+  details: IInvoiceDetails | null // Details can be null if the fetch fails
 ) {
-  logger.debug(`Upserting invoice with UUID: ${rawData.uuid}`);
+  logger.debug(`Upserting invoice with UUID: ${summary.uuid}`);
 
   const invoicePayload: Prisma.InvoiceCreateInput = {
-    // --- Data from the /raw endpoint ---
-    uuid: rawData.uuid,
-    submissionUuid: rawData.submissionUUID,
-    internalId: rawData.internalId,
-    status: rawData.status,
-    typeName: rawData.typeName,
-    typeVersion: rawData.typeVersionName,
-    issuerId: rawData.issuerId,
-    issuerName: rawData.issuerName,
-    receiverId: rawData.receiverId || 'N/A',
-    receiverName: rawData.receiverName || 'N/A',
-    dateTimeIssued: new Date(rawData.dateTimeIssued),
-    dateTimeReceived: new Date(rawData.dateTimeReceived),
-    totalAmount: rawData.total,
-    totalSales: rawData.totalSales,
-    totalDiscount: rawData.totalDiscount,
-    netAmount: rawData.netAmount,
-    
-    // --- FIX: Data sourced from the /search summary ---
-    issuerType: summary.issuerType, 
-    receiverType: summary.receiverType,
+    // These fields come from the reliable summary
+    uuid: summary.uuid,
+    submissionUuid: summary.submissionUUID,
+    internalId: summary.internalId,
+    status: summary.status,
+    typeName: summary.typeName,
+    typeVersion: summary.typeVersionName,
+    issuerId: summary.issuerId,
+    issuerName: summary.issuerName,
+    issuerType: summary.issuerType,
+    receiverId: summary.receiverId || 'N/A',
+    receiverName: summary.receiverName || 'N/A',
+    receiverType: summary.receiverType || 'N/A',
+    dateTimeIssued: new Date(summary.dateTimeIssued),
+    dateTimeReceived: new Date(summary.dateTimeReceived),
+    totalAmount: summary.total,
+
+    // These fields are ENHANCED from the details object, with fallbacks.
+    totalSales: details?.document?.totalSalesAmount || 0,
+    totalDiscount: details?.document?.totalDiscountAmount || 0,
+    netAmount: details?.document?.netAmount || 0,
   };
 
-  const lines = rawData.document?.invoiceLines || [];
+  // Only get lines if the details and the nested objects exist.
+  const lines = details?.document?.invoiceLines || [];
   const lineItemsPayload: Prisma.InvoiceLineCreateManyInput[] = lines.map(line => ({
-    invoiceUuid: rawData.uuid,
+    invoiceUuid: summary.uuid,
     description: line.description,
     itemCode: line.itemCode,
     itemType: line.itemType,
@@ -56,25 +57,25 @@ export async function upsertInvoice(
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.invoice.upsert({
-        where: { uuid: rawData.uuid },
+        where: { uuid: summary.uuid },
         update: invoicePayload,
         create: invoicePayload,
       });
 
-      await tx.invoiceLine.deleteMany({ where: { invoiceUuid: rawData.uuid } });
+      await tx.invoiceLine.deleteMany({ where: { invoiceUuid: summary.uuid } });
       
       if (lineItemsPayload.length > 0) {
         await tx.invoiceLine.createMany({ data: lineItemsPayload });
       }
     });
-    logger.info(`Successfully saved invoice ${rawData.uuid} with ${lineItemsPayload.length} lines.`);
+    logger.info(`Successfully saved invoice ${summary.uuid} with ${lineItemsPayload.length} lines.`);
   } catch (error) {
-    logger.error(`Failed to save invoice ${rawData.uuid}`, { error });
+    logger.error(`Failed to save invoice ${summary.uuid}`, { error });
     throw error;
   }
 }
 
-// ... the rest of the file (getLastSyncTimestamp, etc.) remains the same ...
+// ... the rest of the file is correct and unchanged ...
 export async function getLastSyncTimestamp(): Promise<Date> {
   const status = await prisma.syncStatus.findUnique({ where: { id: 1 } });
   if (status) { return status.lastSyncTimestamp; }
