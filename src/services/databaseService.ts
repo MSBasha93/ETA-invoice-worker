@@ -1,21 +1,18 @@
 // src/services/databaseService.ts
 import { Prisma, PrismaClient } from '@prisma/client';
-import { IInvoiceSummary, IAPIDocumentResponse } from '../types/eta.types';
+import { IInvoiceRawData, IInvoiceSummary } from '../types/eta.types';
 import { logger } from '../utils/logger';
 
 export const prisma = new PrismaClient();
 
 export async function upsertInvoice(
   summary: IInvoiceSummary,
-  details: IAPIDocumentResponse | null
+  rawData: IInvoiceRawData | null
 ) {
   logger.debug(`Upserting invoice with UUID: ${summary.uuid}`);
 
-  // The nested invoice object, or null if it doesn't exist
-  const nestedDoc = details?.document;
-
   const invoicePayload: Prisma.InvoiceCreateInput = {
-    // Start with the reliable data from the summary
+    // Data from the reliable summary object
     uuid: summary.uuid,
     submissionUuid: summary.submissionUUID,
     internalId: summary.internalId,
@@ -31,15 +28,14 @@ export async function upsertInvoice(
     dateTimeIssued: new Date(summary.dateTimeIssued),
     dateTimeReceived: new Date(summary.dateTimeReceived),
     
-    // Enhance with details from the nested object if it exists, otherwise use summary total.
-    totalAmount: nestedDoc?.totalAmount ?? summary.total,
-    totalSales: nestedDoc?.totalSalesAmount ?? 0,
-    totalDiscount: nestedDoc?.totalDiscountAmount ?? 0,
-    netAmount: nestedDoc?.netAmount ?? 0,
+    // Use detailed financials from /raw if available, otherwise fallback to summary total.
+    totalAmount: rawData?.total ?? summary.total,
+    totalSales: rawData?.totalSales ?? 0,
+    totalDiscount: rawData?.totalDiscount ?? 0,
+    netAmount: rawData?.netAmount ?? 0,
   };
 
-  // Get lines ONLY from the nested document object.
-  const lines = nestedDoc?.invoiceLines || [];
+  const lines = rawData?.document?.invoiceLines || [];
   const lineItemsPayload: Prisma.InvoiceLineCreateManyInput[] = lines.map(line => ({
     invoiceUuid: summary.uuid,
     description: line.description,
@@ -77,7 +73,6 @@ export async function upsertInvoice(
   }
 }
 
-// ... getLastSyncTimestamp and updateLastSyncTimestamp are correct and unchanged ...
 export async function getLastSyncTimestamp(): Promise<Date> {
   const status = await prisma.syncStatus.findUnique({ where: { id: 1 } });
   if (status) { return status.lastSyncTimestamp; }
@@ -86,12 +81,12 @@ export async function getLastSyncTimestamp(): Promise<Date> {
   return thirtyDaysAgo;
 }
 
-export async function updateLastSyncTimestamp(): Promise<void> {
-  const now = new Date();
+// This is the single, correct version of this function.
+export async function updateLastSyncTimestamp(syncTime: Date): Promise<void> {
   await prisma.syncStatus.upsert({
     where: { id: 1 },
-    update: { lastSyncTimestamp: now },
-    create: { id: 1, lastSyncTimestamp: now },
+    update: { lastSyncTimestamp: syncTime },
+    create: { id: 1, lastSyncTimestamp: syncTime },
   });
-  logger.info(`Updated last sync timestamp to: ${now.toISOString()}`);
+  logger.info(`Updated last sync timestamp to: ${syncTime.toISOString()}`);
 }
