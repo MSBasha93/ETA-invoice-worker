@@ -1,11 +1,24 @@
-import { Prisma, PrismaClient, PrismaPromise } from '@prisma/client';
+// src/services/databaseService.ts
+import { Prisma, PrismaClient } from '@prisma/client';
 import { IInvoiceDetails } from '../types/eta.types';
 import { logger } from '../utils/logger';
 
 export const prisma = new PrismaClient();
 
 export async function upsertInvoice(invoiceData: IInvoiceDetails) {
+  // --- SAFETY CHECK 1: The 'document' object ---
+  // The API can sometimes return a details object without the nested 'document' object.
+  // We must check for its existence before proceeding.
+  if (!invoiceData.document) {
+    logger.warn({
+      uuid: invoiceData.uuid,
+      status: invoiceData.status
+    }, "Skipping invoice due to missing 'document' object in API response.");
+    return; // Exit the function for this invoice and move to the next one.
+  }
+  
   const doc = invoiceData.document;
+
   const invoicePayload: Prisma.InvoiceCreateInput = {
     uuid: invoiceData.uuid,
     submissionUuid: invoiceData.submissionUUID,
@@ -31,7 +44,10 @@ export async function upsertInvoice(invoiceData: IInvoiceDetails) {
     validationResults: invoiceData.validationResults,
   };
 
-  const lineItemsPayload: Prisma.InvoiceLineCreateManyInput[] = doc.invoiceLines.map(line => ({
+  // --- SAFETY CHECK 2: The 'invoiceLines' array ---
+  // The document object might exist, but be missing the lines array.
+  // The `(doc.invoiceLines || [])` ensures we map over an empty array instead of `undefined`, preventing a crash.
+  const lineItemsPayload: Prisma.InvoiceLineCreateManyInput[] = (doc.invoiceLines || []).map(line => ({
     invoiceUuid: invoiceData.uuid,
     description: line.description,
     itemCode: line.itemCode,
@@ -48,8 +64,8 @@ export async function upsertInvoice(invoiceData: IInvoiceDetails) {
     taxableItems: line.lineTaxableItems || [],
   }));
 
+
   try {
-    // --- CHANGE 2: Add the correct type for the transaction client 'tx' ---
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.invoice.upsert({
         where: { uuid: invoiceData.uuid },
@@ -58,7 +74,10 @@ export async function upsertInvoice(invoiceData: IInvoiceDetails) {
       });
 
       await tx.invoiceLine.deleteMany({ where: { invoiceUuid: invoiceData.uuid } });
-      await tx.invoiceLine.createMany({ data: lineItemsPayload });
+      
+      if (lineItemsPayload.length > 0) {
+        await tx.invoiceLine.createMany({ data: lineItemsPayload });
+      }
     });
     logger.debug(`Successfully saved invoice ${invoiceData.uuid}`);
   } catch (error) {
@@ -72,7 +91,6 @@ export async function getLastSyncTimestamp(): Promise<Date> {
   if (status) {
     return status.lastSyncTimestamp;
   }
-  // If no record exists, go back 30 days for the initial sync
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   return thirtyDaysAgo;

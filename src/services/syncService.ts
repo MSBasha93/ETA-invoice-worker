@@ -1,3 +1,4 @@
+// src/services/syncService.ts
 import PQueue from 'p-queue';
 import { logger } from '../utils/logger';
 import * as db from './databaseService';
@@ -15,15 +16,13 @@ export async function runFullSync() {
 
   const lastSyncTime = await db.getLastSyncTimestamp();
   
-  // --- CORRECTED LOGIC: Add an end date for the query ---
   const now = new Date();
   const searchParams = {
     submissionDateFrom: lastSyncTime.toISOString(),
     submissionDateTo: now.toISOString(), // Always provide an end date
     pageSize: config.worker.pageSize,
   };
-  // --- END OF CORRECTION ---
-
+  
   logger.info(`Fetching invoices from ${searchParams.submissionDateFrom} to ${searchParams.submissionDateTo}`);
 
   let continuationToken: string | undefined;
@@ -33,8 +32,6 @@ export async function runFullSync() {
   do {
     logger.info(`Processing page ${page}...`);
 
-    // The API requires that the date filters are NOT sent on subsequent paginated requests.
-    // So we'll build the parameters for each loop iteration.
     const currentPageParams: any = {
       pageSize: config.worker.pageSize,
       continuationToken,
@@ -47,7 +44,7 @@ export async function runFullSync() {
 
     const searchResult = await eta.searchInvoices(currentPageParams);
     
-    if (searchResult.result.length === 0) {
+    if (!searchResult.result || searchResult.result.length === 0) {
       logger.info('No new documents found on this page.');
       break;
     }
@@ -56,18 +53,21 @@ export async function runFullSync() {
     
     const tasks = searchResult.result.map((summary: IInvoiceSummary) => 
       detailFetchQueue.add(async () => {
-        const details = await eta.getInvoiceDetails(summary.uuid);
-        
-        if (summary && !details.document?.issuer?.id) {
-          if (!details.document) {
-            // @ts-ignore
-            details.document = {}; 
+        try {
+          const details = await eta.getInvoiceDetails(summary.uuid);
+          
+          // Defensive check: If the details object is missing core document info,
+          // merge it from the summary object to prevent data loss.
+          if (details.document && !details.document.issuer?.id) {
+            details.document.issuer = { id: summary.issuerId, name: summary.issuerName, type: '', address: {} };
+            details.document.receiver = { id: summary.receiverId, name: summary.receiverName, type: '', address: {} };
           }
-          details.document.issuer = { id: summary.issuerId, name: summary.issuerName, type: '', address: {} };
-          details.document.receiver = { id: summary.receiverId, name: summary.receiverName, type: '', address: {} };
+          
+          allDetails.push(details);
+        } catch (error) {
+          logger.error({ uuid: summary.uuid, error }, "Failed to fetch details for a document.");
+          // We continue processing other documents even if one fails.
         }
-        
-        allDetails.push(details);
       })
     );
     
