@@ -8,13 +8,17 @@ export interface IInvoiceSummary {
   typeVersionName: string;
   issuerId: string;
   issuerName: string;
+  issuerType: string; // <-- Must be here
   receiverId: string;
   receiverName: string;
+  receiverType: string; // <-- Must be here
   dateTimeIssued: string;
   dateTimeReceived: string;
   total: number;
   status: string;
 }
+
+// ... rest of the file is unchanged, but included for completeness ...
 
 export interface IInvoiceSearchResult {
   result: IInvoiceSummary[];
@@ -23,7 +27,6 @@ export interface IInvoiceSearchResult {
   };
 }
 
-// A single line item, matching the structure inside the API response
 export interface IInvoiceLine {
   description: string;
   itemType: string;
@@ -43,7 +46,6 @@ export interface IInvoiceLine {
   internalCode: string;
 }
 
-// This now models the response from the GET .../documents/{uuid}/raw endpoint
 export interface IInvoiceRawData {
   uuid: string;
   submissionUUID: string;
@@ -52,7 +54,6 @@ export interface IInvoiceRawData {
   typeVersionName: string;
   issuerId: string;
   issuerName: string;
-  // Use optional chaining for receiver as it might not always exist
   receiverId?: string;
   receiverName?: string;
   dateTimeIssued: string;
@@ -62,7 +63,6 @@ export interface IInvoiceRawData {
   netAmount: number;
   total: number;
   status: string;
-  // The 'document' object is optional and may only contain invoiceLines
   document?: {
     invoiceLines?: IInvoiceLine[];
   };

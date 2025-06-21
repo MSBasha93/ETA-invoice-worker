@@ -1,14 +1,19 @@
 // src/services/databaseService.ts
 import { Prisma, PrismaClient } from '@prisma/client';
-import { IInvoiceRawData } from '../types/eta.types';
+import { IInvoiceRawData, IInvoiceSummary } from '../types/eta.types';
 import { logger } from '../utils/logger';
 
 export const prisma = new PrismaClient();
 
-export async function upsertInvoice(rawData: IInvoiceRawData) {
+// The function now accepts the summary object alongside the raw data
+export async function upsertInvoice(
+  summary: IInvoiceSummary,
+  rawData: IInvoiceRawData
+) {
   logger.debug(`Upserting invoice with UUID: ${rawData.uuid}`);
 
   const invoicePayload: Prisma.InvoiceCreateInput = {
+    // --- Data from the /raw endpoint ---
     uuid: rawData.uuid,
     submissionUuid: rawData.submissionUUID,
     internalId: rawData.internalId,
@@ -17,7 +22,6 @@ export async function upsertInvoice(rawData: IInvoiceRawData) {
     typeVersion: rawData.typeVersionName,
     issuerId: rawData.issuerId,
     issuerName: rawData.issuerName,
-    // Safely handle potentially missing receiver info
     receiverId: rawData.receiverId || 'N/A',
     receiverName: rawData.receiverName || 'N/A',
     dateTimeIssued: new Date(rawData.dateTimeIssued),
@@ -26,9 +30,12 @@ export async function upsertInvoice(rawData: IInvoiceRawData) {
     totalSales: rawData.totalSales,
     totalDiscount: rawData.totalDiscount,
     netAmount: rawData.netAmount,
+    
+    // --- FIX: Data sourced from the /search summary ---
+    issuerType: summary.issuerType, 
+    receiverType: summary.receiverType,
   };
 
-  // Safely get lines from the optional nested object
   const lines = rawData.document?.invoiceLines || [];
   const lineItemsPayload: Prisma.InvoiceLineCreateManyInput[] = lines.map(line => ({
     invoiceUuid: rawData.uuid,
@@ -54,7 +61,7 @@ export async function upsertInvoice(rawData: IInvoiceRawData) {
         create: invoicePayload,
       });
 
-      await tx.invoiceLine.deleteMany({ where: { invoiceUuid: rawData.uuid } });
+      await tx.invoiceLine.deleteMany({ where: { uuid: rawData.uuid } });
       
       if (lineItemsPayload.length > 0) {
         await tx.invoiceLine.createMany({ data: lineItemsPayload });
@@ -67,6 +74,7 @@ export async function upsertInvoice(rawData: IInvoiceRawData) {
   }
 }
 
+// ... the rest of the file (getLastSyncTimestamp, etc.) remains the same ...
 export async function getLastSyncTimestamp(): Promise<Date> {
   const status = await prisma.syncStatus.findUnique({ where: { id: 1 } });
   if (status) { return status.lastSyncTimestamp; }
