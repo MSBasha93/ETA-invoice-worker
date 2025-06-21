@@ -61,7 +61,7 @@ export async function upsertInvoice(
         create: invoicePayload,
       });
 
-      await tx.invoiceLine.deleteMany({ where: { uuid: rawData.uuid } });
+      await tx.invoiceLine.deleteMany({ where: { invoiceUuid: rawData.uuid } });
       
       if (lineItemsPayload.length > 0) {
         await tx.invoiceLine.createMany({ data: lineItemsPayload });
