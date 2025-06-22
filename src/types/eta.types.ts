@@ -25,6 +25,7 @@ export interface IInvoiceSearchResult {
   };
 }
 
+// --- THIS INTERFACE IS NOW CORRECT AND COMPLETE ---
 export interface IInvoiceLine {
   description: string;
   itemType: string;
@@ -35,16 +36,20 @@ export interface IInvoiceLine {
     amountEGP: number;
   };
   salesTotal: number;
-  netTotal: number;
   total: number;
+  valueDifference: number;
+  totalTaxableFees: number;
+  netTotal: number;
+  itemsDiscount: number;
   discount: {
     rate: number;
     amount: number;
   };
+  taxableItems?: any[]; // The '?' makes it optional
   internalCode: string;
 }
 
-// Models the response from the GET /.../raw endpoint, where the 'document' object is optional.
+// This models the response from the GET .../raw endpoint
 export interface IInvoiceRawData {
   uuid: string;
   submissionUUID: string;
